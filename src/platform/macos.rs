@@ -4,7 +4,6 @@ use cocoa::{
     foundation::NSString,
 };
 use core_graphics::geometry::{CGPoint, CGRect, CGSize};
-use json::JsonValue;
 use objc::{
     class,
     declare::ClassDecl,
@@ -21,7 +20,7 @@ pub struct WebView<'a> {
 
     #[allow(dead_code)]
     // NOTE: invoke_handler is used by external_invoke() but the compiler can't see it
-    invoke_handler: Box<dyn Fn(JsonValue) + 'a>,
+    invoke_handler: Box<dyn FnMut(&str) + 'a>,
 }
 
 impl<'a> Drop for WebView<'a> {
@@ -47,19 +46,18 @@ extern "C" fn external_invoke<F>(
     _content_controller: id,
     script_message: id,
 ) where
-    F: FnMut(JsonValue),
+    F: FnMut(&str),
 {
     let handler: &mut F = unsafe { &mut *(*this.get_ivar::<*mut c_void>("handler") as *mut F) };
 
-    let value = json::parse(unsafe {
+    let value = unsafe {
         let body: id = msg_send![script_message, body];
         str::from_utf8(slice::from_raw_parts(
             body.UTF8String() as *const u8,
             body.len(),
         ))
         .unwrap()
-    })
-    .unwrap();
+    };
 
     handler(value);
 }
@@ -71,7 +69,7 @@ const WKUSER_SCRIPT_INJECTION_TIME_AT_DOCUMENT_START: u32 = 0;
 impl<'a> WebView<'a> {
     pub fn new<F>(position: Position, size: Size, invoke_handler: F) -> Self
     where
-        F: Fn(JsonValue) + 'a,
+        F: FnMut(&str) + 'a,
     {
         let frame = CGRect {
             origin: CGPoint {
