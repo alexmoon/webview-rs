@@ -7,7 +7,7 @@ fn main() {
     let mut window = Window::new(&events_loop).unwrap();
     let size: (f64, f64) = window.get_inner_size().unwrap().into();
 
-    let mut web_view = WebView::new(Position::new(0.0, 0.0), size.into(), |val| {
+    let mut web_view = WebView::new(Position::new(0.0, 0.0), size.into(), |_, val| {
         eprintln!("invoke called with {}", val);
     });
 
