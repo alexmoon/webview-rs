@@ -4,11 +4,12 @@ use cocoa::{
     foundation::NSString,
 };
 use core_graphics::geometry::{CGPoint, CGRect, CGSize};
+use dispatch;
 use objc::{
     class,
     declare::ClassDecl,
     msg_send,
-    rc::StrongPtr,
+    rc::{StrongPtr, WeakPtr},
     runtime::{Class, Object, Sel},
     sel, sel_impl,
 };
@@ -16,25 +17,33 @@ use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use std::{ffi::c_void, ptr, slice, str, sync::Once};
 
 pub struct WebView<'a> {
-    web_view: Option<StrongPtr>,
+    web_view: StrongPtr,
 
     #[allow(dead_code)]
     // NOTE: invoke_handler is used by external_invoke() but the compiler can't see it
     invoke_handler: Box<dyn FnMut(*mut Self, &str) + 'a>,
 }
 
+pub struct Handle {
+    web_view: WeakPtr,
+}
+
+unsafe impl Send for Handle {}
+
+unsafe impl Sync for Handle {}
+
 impl<'a> Drop for WebView<'a> {
     fn drop(&mut self) {
-        match &self.web_view {
-            Some(web_view) => unsafe {
-                let configuration: id = msg_send![**web_view, configuration];
+        if *self.web_view != nil {
+            unsafe {
+                let configuration: id = msg_send![*self.web_view, configuration];
                 let user_content_controller: id = msg_send![configuration, userContentController];
                 let name = StrongPtr::new(NSString::alloc(nil).init_str("invoke"));
                 let _: () =
                     msg_send![user_content_controller, removeScriptMessageHandlerForName: *name];
-                self.remove_from_parent();
-            },
-            None => (),
+            }
+            
+            self.remove_from_parent();
         }
     }
 }
@@ -73,7 +82,7 @@ impl<'a> WebView<'a> {
         F: FnMut(*mut Self, &str) + 'a,
     {
         WebView {
-            web_view: None,
+            web_view: unsafe { StrongPtr::new(nil) },
             invoke_handler: Box::new(invoke_handler),
         }
     }
@@ -90,7 +99,7 @@ impl<'a> WebView<'a> {
             },
         };
 
-        self.web_view = Some(unsafe {
+        self.web_view = unsafe {
             let configuration = StrongPtr::new(msg_send![class!(WKWebViewConfiguration), new]);
 
             #[cfg(debug_assertions)]
@@ -130,7 +139,7 @@ impl<'a> WebView<'a> {
             let _: () = msg_send![*web_view, setAutoresizingMask: (NSVIEW_WIDTH_SIZABLE | NSVIEW_HEIGHT_SIZABLE)];
 
             web_view
-        });
+        };
 
         self.inject_script(
             r#"
@@ -144,7 +153,7 @@ impl<'a> WebView<'a> {
     }
 
     fn web_view(&self) -> id {
-        **self.web_view.as_ref().unwrap()
+        *self.web_view
     }
 
     pub fn add_to<T: HasRawWindowHandle>(&mut self, window: &mut T) {
@@ -201,7 +210,7 @@ impl<'a> WebView<'a> {
         };
     }
 
-    pub fn load(&mut self, request: Load) {
+    pub fn load(&self, request: Load) {
         match request {
             Load::Html { data, base } => unsafe {
                 let html = StrongPtr::new(NSString::alloc(nil).init_str(data));
@@ -235,14 +244,14 @@ impl<'a> WebView<'a> {
         }
     }
 
-    pub fn eval(&mut self, script: &str) {
+    pub fn eval(&self, script: &str) {
         unsafe {
             let script = StrongPtr::new(NSString::alloc(nil).init_str(script));
-            let _: () = msg_send![self.web_view(), evaluateJavaScript: script completionHandler: ptr::null::<c_void>() ];
+            let _: () = msg_send![self.web_view(), evaluateJavaScript: *script completionHandler: ptr::null::<c_void>() ];
         }
     }
 
-    pub fn inject_script(&mut self, script: &str) {
+    pub fn inject_script(&self, script: &str) {
         unsafe {
             let configuration: id = msg_send![self.web_view(), configuration];
             let user_content_controller: id = msg_send![configuration, userContentController];
@@ -254,5 +263,37 @@ impl<'a> WebView<'a> {
 
             let _: () = msg_send![user_content_controller, addUserScript: *user_script];
         }
+    }
+
+    pub fn handle(&self) -> Handle {
+        Handle {
+            web_view: self.web_view.weak(),
+        }
+    }
+}
+
+impl Handle {
+    pub fn dispatch<T>(&self, script: T) -> Result<(), ()>
+    where
+        T: ToOwned,
+        T::Owned: AsRef<str> + Send + 'static,
+    {
+        let web_view = self.web_view.load();
+        if *web_view == nil {
+            return Err(());
+        }
+
+        struct SendWrapper(StrongPtr);
+        unsafe impl Send for SendWrapper {}
+        let wrapper = SendWrapper(web_view);
+
+        let script = script.to_owned();
+
+        dispatch::Queue::main().r#async(move || unsafe {
+            let s = StrongPtr::new(NSString::alloc(nil).init_str(script.as_ref()));
+            let _: () = msg_send![*wrapper.0, evaluateJavaScript: *s completionHandler: ptr::null::<c_void>()];
+        });
+
+        Ok(())
     }
 }

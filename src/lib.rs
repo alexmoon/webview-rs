@@ -20,6 +20,8 @@ pub struct WebView<'a> {
     inner: Box<platform::WebView<'a>>,
 }
 
+pub use platform::Handle;
+
 impl<'a> WebView<'a> {
     pub fn new<F>(position: Position, size: Size, mut invoke_handler: F) -> Self
     where
@@ -27,7 +29,7 @@ impl<'a> WebView<'a> {
     {
         let mut inner = Box::new(platform::WebView::new(move |inner, val| {
             let mut webview = ManuallyDrop::new(WebView {
-                inner: unsafe { Box::from_raw(inner as *mut platform::WebView) },
+                inner: unsafe { Box::from_raw(inner) },
             });
             invoke_handler(&mut webview, val);
         }));

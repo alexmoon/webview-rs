@@ -1,4 +1,4 @@
-use std::convert::Into;
+use std::{convert::Into, thread, time::Duration};
 use webview::{geometry::Position, http::Request, Load, WebView};
 use winit::{ControlFlow, Event, EventsLoop, Window, WindowEvent};
 
@@ -18,6 +18,12 @@ fn main() {
             .body(())
             .unwrap(),
     ));
+
+    let handle = web_view.handle();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(5));
+        handle.dispatch(r#"console.log("hello world")"#).ok();
+    });
 
     events_loop.run_forever(|event| match event {
         Event::WindowEvent {

@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 "raw-window-handle" = "0.3.3"
 http = "0.2.0"
+dispatch = "0.1.4"
 
 [dev-dependencies]
 "winit" = "0.19.5"
