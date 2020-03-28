@@ -9,7 +9,7 @@ use objc::{
     class,
     declare::ClassDecl,
     msg_send,
-    rc::{StrongPtr, WeakPtr},
+    rc::StrongPtr,
     runtime::{Class, Object, Sel},
     sel, sel_impl,
 };
@@ -24,9 +24,7 @@ pub struct WebView<'a> {
     invoke_handler: Box<dyn FnMut(*mut Self, &str) + 'a>,
 }
 
-pub struct Handle {
-    web_view: WeakPtr,
-}
+pub struct Handle();
 
 unsafe impl Send for Handle {}
 
@@ -42,7 +40,7 @@ impl<'a> Drop for WebView<'a> {
                 let _: () =
                     msg_send![user_content_controller, removeScriptMessageHandlerForName: *name];
             }
-            
+
             self.remove_from_parent();
         }
     }
@@ -266,34 +264,15 @@ impl<'a> WebView<'a> {
     }
 
     pub fn handle(&self) -> Handle {
-        Handle {
-            web_view: self.web_view.weak(),
-        }
+        Handle()
     }
 }
 
 impl Handle {
-    pub fn dispatch<T>(&self, script: T) -> Result<(), ()>
+    pub fn dispatch<F>(&self, callback: F)
     where
-        T: ToOwned,
-        T::Owned: AsRef<str> + Send + 'static,
+        F: 'static + Send + FnOnce(),
     {
-        let web_view = self.web_view.load();
-        if *web_view == nil {
-            return Err(());
-        }
-
-        struct SendWrapper(StrongPtr);
-        unsafe impl Send for SendWrapper {}
-        let wrapper = SendWrapper(web_view);
-
-        let script = script.to_owned();
-
-        dispatch::Queue::main().r#async(move || unsafe {
-            let s = StrongPtr::new(NSString::alloc(nil).init_str(script.as_ref()));
-            let _: () = msg_send![*wrapper.0, evaluateJavaScript: *s completionHandler: ptr::null::<c_void>()];
-        });
-
-        Ok(())
+        dispatch::Queue::main().r#async(callback);
     }
 }
