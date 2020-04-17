@@ -19,6 +19,8 @@ fn main() {
             .unwrap(),
     ));
 
+    println!("URI: {:?}", web_view.get_uri());
+
     events_loop.run_forever(|event| match event {
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,

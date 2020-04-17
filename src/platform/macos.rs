@@ -1,3 +1,5 @@
+#![allow(clippy::let_unit_value)]
+
 use crate::{geometry::*, Load};
 use cocoa::{
     base::{id, nil},
@@ -5,6 +7,7 @@ use cocoa::{
 };
 use core_graphics::geometry::{CGPoint, CGRect, CGSize};
 use dispatch;
+use http::Uri;
 use objc::{
     class,
     declare::ClassDecl,
@@ -14,7 +17,7 @@ use objc::{
     sel, sel_impl,
 };
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
-use std::{ffi::c_void, ptr, slice, str, sync::Once};
+use std::{convert::TryFrom, ffi::c_void, ptr, slice, str, sync::Once};
 
 pub struct WebView<'a> {
     web_view: StrongPtr,
@@ -49,7 +52,7 @@ impl<'a> Drop for WebView<'a> {
 static mut INVOKE_SCRIPT_MESSAGE_HANDLER_CLASS: *const Class = ptr::null();
 static INVOKE_SCRIPT_MESSAGE_HANDLER_CLASS_INIT: Once = Once::new();
 
-extern "C" fn external_invoke<'a>(
+extern "C" fn external_invoke(
     this: &Object,
     _cmd: Sel,
     _content_controller: id,
@@ -206,6 +209,20 @@ impl<'a> WebView<'a> {
         let _: () = unsafe {
             msg_send![self.web_view(), setFrameSize: CGSize { width: size.width, height: size.height }]
         };
+    }
+
+    pub fn get_uri(&self) -> Option<Uri> {
+        let url = unsafe { StrongPtr::new(msg_send![self.web_view(), URL]) };
+        let string = unsafe { StrongPtr::new(msg_send![*url, absoluteString]) };
+        let bytes = unsafe {
+            let ptr = string.UTF8String() as *const u8;
+            if ptr.is_null() {
+                None
+            } else {
+                Some(slice::from_raw_parts(ptr, string.len()))
+            }
+        };
+        bytes.and_then(|x| Uri::try_from(x).ok())
     }
 
     pub fn load(&self, request: Load) {
