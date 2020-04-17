@@ -290,6 +290,6 @@ impl Handle {
     where
         F: 'static + Send + FnOnce(),
     {
-        dispatch::Queue::main().r#async(callback);
+        dispatch::Queue::main().exec_async(callback);
     }
 }

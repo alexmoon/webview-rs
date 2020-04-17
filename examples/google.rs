@@ -1,11 +1,18 @@
 use std::convert::Into;
 use webview::{geometry::Position, http::Request, Load, WebView};
-use winit::{ControlFlow, Event, EventsLoop, Window, WindowEvent};
+use winit::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::Window,
+};
 
 fn main() {
-    let mut events_loop = EventsLoop::new();
+    let events_loop = EventLoop::new();
     let mut window = Window::new(&events_loop).unwrap();
-    let size: (f64, f64) = window.get_inner_size().unwrap().into();
+    let size: (f64, f64) = window
+        .inner_size()
+        .to_logical::<f64>(window.scale_factor())
+        .into();
 
     let mut web_view = WebView::new(Position::new(0.0, 0.0), size.into(), |_, val| {
         eprintln!("invoke called with {}", val);
@@ -21,14 +28,14 @@ fn main() {
 
     println!("URI: {:?}", web_view.get_uri());
 
-    events_loop.run_forever(|event| match event {
-        Event::WindowEvent {
+    events_loop.run(move |event, _, control_flow| {
+        if let Event::WindowEvent {
             event: WindowEvent::CloseRequested,
             ..
-        } => {
+        } = event
+        {
             println!("The close button was pressed; stopping");
-            ControlFlow::Break
+            *control_flow = ControlFlow::Exit;
         }
-        _ => ControlFlow::Continue,
     });
 }
