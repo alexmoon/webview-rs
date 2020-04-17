@@ -212,13 +212,13 @@ impl<'a> WebView<'a> {
     }
 
     pub fn get_uri(&self) -> Option<Uri> {
-        let url = unsafe { StrongPtr::new(msg_send![self.web_view(), URL]) };
-        let string = unsafe { StrongPtr::new(msg_send![*url, absoluteString]) };
+        let url: id = unsafe { msg_send![self.web_view(), URL] };
+        let string: id = unsafe { msg_send![url, absoluteString] };
         let bytes = unsafe {
-            let ptr = string.UTF8String() as *const u8;
-            if ptr.is_null() {
+            if string.is_null() || string.len() == 0 {
                 None
             } else {
+                let ptr = string.UTF8String() as *const u8;
                 Some(slice::from_raw_parts(ptr, string.len()))
             }
         };
