@@ -6,7 +6,6 @@ use cocoa::{
     foundation::NSString,
 };
 use core_graphics::geometry::{CGPoint, CGRect, CGSize};
-use dispatch;
 use http::Uri;
 use objc::{
     class,
@@ -49,8 +48,8 @@ impl<'a> Drop for WebView<'a> {
     }
 }
 
-static mut INVOKE_SCRIPT_MESSAGE_HANDLER_CLASS: *const Class = ptr::null();
-static INVOKE_SCRIPT_MESSAGE_HANDLER_CLASS_INIT: Once = Once::new();
+static mut DELEGATE_CLASS: *const Class = ptr::null();
+static DELEGATE_CLASS_INIT: Once = Once::new();
 
 extern "C" fn external_invoke(
     this: &Object,
@@ -71,6 +70,25 @@ extern "C" fn external_invoke(
 
     let invoke_handler = &mut unsafe { &mut *webview }.invoke_handler;
     invoke_handler(webview as *mut WebView, value);
+}
+
+extern "C" fn navigation_new_window(
+    _this: &Object,
+    _cmd: Sel,
+    web_view: id,
+    _configuration: id,
+    navigation_action: id,
+    _window_features: id,
+) -> id {
+    unsafe {
+        let target_frame: id = msg_send![navigation_action, targetFrame];
+        if target_frame == nil {
+            let request: id = msg_send![navigation_action, request];
+            msg_send![web_view, loadRequest: request]
+        }
+    }
+
+    nil
 }
 
 const NSVIEW_WIDTH_SIZABLE: u32 = 2;
@@ -109,34 +127,38 @@ impl<'a> WebView<'a> {
                 let _: () = msg_send![preferences, _setDeveloperExtrasEnabled: true];
             }
 
-            INVOKE_SCRIPT_MESSAGE_HANDLER_CLASS_INIT.call_once(|| {
-                let mut decl =
-                    ClassDecl::new("InvokeScriptMessageHandler", class!(NSObject)).unwrap();
+            DELEGATE_CLASS_INIT.call_once(|| {
+                let mut decl = ClassDecl::new("RustWebViewDelegate", class!(NSObject)).unwrap();
+                decl.add_ivar::<*const c_void>("webview");
                 decl.add_method(
                     sel!(userContentController:didReceiveScriptMessage:),
                     external_invoke as extern "C" fn(&Object, Sel, id, id),
                 );
-                decl.add_ivar::<*const c_void>("webview");
-                INVOKE_SCRIPT_MESSAGE_HANDLER_CLASS = decl.register() as *const Class;
+                decl.add_method(
+                    sel!(webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:),
+                    navigation_new_window as extern "C" fn(&Object, Sel, id, id, id, id) -> id,
+                );
+                DELEGATE_CLASS = decl.register() as *const Class;
             });
 
-            let script_message_handler =
-                StrongPtr::new(msg_send![INVOKE_SCRIPT_MESSAGE_HANDLER_CLASS, new]);
+            let delegate = StrongPtr::new(msg_send![DELEGATE_CLASS, new]);
 
-            (*script_message_handler)
+            (*delegate)
                 .as_mut()
                 .unwrap()
                 .set_ivar("webview", self as *mut _ as *mut c_void);
 
             let user_content_controller: id = msg_send![*configuration, userContentController];
             let name = StrongPtr::new(NSString::alloc(nil).init_str("invoke"));
-            let _: () = msg_send![user_content_controller, addScriptMessageHandler: *script_message_handler name: *name];
+            let _: () =
+                msg_send![user_content_controller, addScriptMessageHandler: *delegate name: *name];
 
             let web_view: id = msg_send![class!(WKWebView), alloc];
             let web_view = StrongPtr::new(
                 msg_send![web_view, initWithFrame: frame configuration: *configuration],
             );
 
+            let _: () = msg_send![*web_view, setUIDelegate: *delegate];
             let _: () = msg_send![*web_view, setAutoresizingMask: (NSVIEW_WIDTH_SIZABLE | NSVIEW_HEIGHT_SIZABLE)];
 
             web_view
